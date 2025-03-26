@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Trink-Würfelspiel 🎲🍻</title>
+
+    <!-- Firebase SDK (ältere Version für Kompatibilität) -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #f8c471; padding: 20px; }
+        .container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); max-width: 400px; margin: auto; }
+        button { background-color: #e74c3c; color: white; border: none; padding: 10px 20px; font-size: 18px; cursor: pointer; border-radius: 5px; margin-top: 10px; }
+        button:hover { background-color: #c0392b; }
+        #playerList { margin-top: 20px; }
+        #playerList ul { list-style-type: none; padding: 0; }
+        #playerList li { background-color: #f0f0f0; padding: 8px; margin: 5px 0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎲 Olga 🍻</h1>
+        <input type="text" id="playerName" placeholder="Dein Name" />
+        <button onclick="joinGame()">Beitreten</button>
+        <button onclick="startGame()" id="startGameBtn" disabled>Spiel starten</button>
+        
+        <div id="playerList">
+            <h3>Spieler im Spiel:</h3>
+            <ul id="playerListUL"></ul>
+        </div>
+
+        <h3 id="currentTurn"></h3>
+        <button onclick="rollDice()">🎲 Würfeln!</button>
+        <h2 id="result"></h2>
+        <h3>Letzte Würfe:</h3>
+        <ul id="history"></ul>
+
+        <button onclick="leaveGame()" id="leaveBtn" style="display: none;">Spiel Verlassen</button>
+        <button onclick="restartGame()" id="restartBtn" style="display: none;">Neustart</button>
+    </div>
+
+    <script>
+        console.log("🚀 Script gestartet!");
+
+        // 🔥 Firebase Konfiguration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDgt-YmOgd5n5V7d-FV2p3fgU0JrILsjEE",
+            authDomain: "trinkspiel-263ce.firebaseapp.com",
+            databaseURL: "https://trinkspiel-263ce-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "trinkspiel-263ce",
+            storageBucket: "trinkspiel-263ce.firebasestorage.app",
+            messagingSenderId: "22325609515",
+            appId: "G-4N04CXDYBZ"
+        };
+
+        // Firebase initialisieren
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        let playerName = "";
+        let playerList = [];
+        let currentPlayerIndex = 0;
+        let playerId = null;
+
+        // Spieler beitreten
+        function joinGame() {
+            playerName = document.getElementById("playerName").value;
+            if (playerName) {
+                // Spielername zur Firebase-Datenbank hinzufügen
+                playerId = db.ref("players").push(playerName).key; // Speichert die eindeutige ID des Spielers
+                alert(`Willkommen, ${playerName}! Du bist jetzt Teil des verrücktesten Trinkspiels! 🍻🎉`);
+                console.log(`👤 Spieler beigetreten: ${playerName}`);
+
+                // Spieler in der Liste anzeigen
+                updatePlayerList();
+
+                // Wenn ein zweiter Spieler beigetreten ist, Aktivierung des "Spiel starten"-Buttons
+                db.ref("players").once("value", snapshot => {
+                    playerList = Object.values(snapshot.val() || []);
+                    if (playerList.length > 1) {
+                        document.getElementById("startGameBtn").disabled = false; // Aktiviert den "Spiel starten"-Button
+                    }
+                });
+
+                // "Spiel Verlassen"-Button anzeigen
+                document.getElementById("leaveBtn").style.display = "block";
+            } else {
+                alert("❌ Bitte gib deinen Namen ein!");
+            }
+        }
+
+        // Spieler aus dem Spiel entfernen
+        function leaveGame() {
+            if (playerId) {
+                // Entferne den Spieler aus der Firebase-Datenbank
+                db.ref(`players/${playerId}`).remove()
+                    .then(() => {
+                        console.log(`❌ Spieler ${playerName} hat das Spiel verlassen.`);
+                        alert(`${playerName} hat das Spiel verlassen.`);
+                        playerId = null;
+
+                        // "Spiel Verlassen"-Button ausblenden
+                        document.getElementById("leaveBtn").style.display = "none";
+                        updatePlayerList();
+                    });
+            }
+        }
+
+        // Neustrart des Spiels - alle Spieler löschen
+        function restartGame() {
+            // Lösche alle Spieler und den Spielstand
+            db.ref("players").remove()
+                .then(() => {
+                    console.log("❌ Alle Spieler wurden entfernt. Das Spiel wird neu gestartet.");
+                    alert("Das Spiel wurde zurückgesetzt! Alle Spieler wurden entfernt.");
+
+                    // Alle Spielstände zurücksetzen
+                    db.ref("game").remove();
+                    db.ref("rolls").remove();
+
+                    // Spieler-Liste und UI zurücksetzen
+                    updatePlayerList();
+
+                    // "Neustart"-Button ausblenden
+                    document.getElementById("restartBtn").style.display = "none";
+                    document.getElementById("startGameBtn").disabled = false; // Button wieder aktivieren
+                });
+        }
+
+        // Spiel starten
+        function startGame() {
+            db.ref("players").once("value", snapshot => {
+                playerList = Object.values(snapshot.val() || []);
+                if (playerList.length > 1) {
+                    // Initialisiere den Spielzustand
+                    db.ref("game").set({ turn: 0 });
+                    alert(`Spiel startet! 🎉 Es geht los, ${playerList[0]} beginnt als erster! 🍻`);
+                    updateTurn();
+                    document.getElementById("startGameBtn").disabled = true; // Deaktiviert den "Spiel starten"-Button nach dem Start
+                    document.getElementById("restartBtn").style.display = "block"; // Zeigt den "Neustart"-Button
+                } else {
+                    alert("❌ Es müssen mindestens 2 Spieler beitreten!");
+                }
+            });
+        }
+
+        // Spieler-Liste anzeigen
+        function updatePlayerList() {
+            const playerListUL = document.getElementById("playerListUL");
+            playerListUL.innerHTML = ""; // Leert die Liste
+
+            // Firebase-Daten abrufen
+            db.ref("players").on("value", snapshot => {
+                const players = snapshot.val();
+                if (players) {
+                    // Spieler in der Liste anzeigen
+                    for (const playerId in players) {
+                        let li = document.createElement("li");
+                        li.innerText = players[playerId];
+                        playerListUL.appendChild(li);
+                    }
+                }
+            });
+        }
+
+        // Aktualisiere den aktuellen Spieler
+        function updateTurn() {
+            db.ref("game/turn").once("value", snapshot => {
+                currentPlayerIndex = snapshot.val();
+                document.getElementById("currentTurn").innerText = `${playerList[currentPlayerIndex]} ist dran! 🎉`;
+            });
+        }
+
+        // Würfeln
+        function rollDice() {
+            if (playerName !== playerList[currentPlayerIndex]) {
+                alert("❌ Du bist nicht dran! Geduld, dein Moment kommt noch!");
+                return;
+            }
+
+            let dice = Math.floor(Math.random() * 6) + 1;
+            let resultText = "";
+            
+            switch (dice) {
+                case 1:
+                    resultText = "trinkt 1 Schluck! 🍺";
+                    break;
+                case 2:
+                    resultText = "bestimmt jemanden für 2 Schlücke! 😈";
+                    break;
+                case 3:
+                    resultText = "Alle trinken 1 Schluck! 🍻";
+                    break;
+                case 4:
+                    resultText = "darf eine neue Regel erfinden! 🤔";
+                    break;
+                case 5:
+                    resultText = "trinkt 2 Schlücke! 🍷";
+                    break;
+                case 6:
+                    resultText = "muss ein ganzes Glas trinken oder eine Regel ignorieren! 😵";
+                    break;
+            }
+
+            let message = `${playerName} hat eine ${dice} geworfen – ${resultText}`;
+            console.log("🎲 Würfelergebnis:", message);
+
+            // Speichere das Würfelergebnis in der Firebase-Datenbank
+            db.ref("rolls").push(message);
+            // Nächster Spieler ist dran
+            currentPlayerIndex = (currentPlayerIndex + 1) % playerList.length;
+            db.ref("game/turn").set(currentPlayerIndex);
+        }
+
+        // Anzeigen der letzten Würfe
+        db.ref("rolls").on("child_added", snapshot => {
+            let li = document.createElement("li");
+            li.innerText = snapshot.val();
+            document.getElementById("history").appendChild(li);
+        });
+
+        // Aktualisiere den aktuellen Spieler, wenn sich der "turn" in Firebase ändert
+        db.ref("game/turn").on("value", snapshot => {
+            if (snapshot.exists()) updateTurn();
+        });
+    </script>
+</body>
+</html>
+
+
